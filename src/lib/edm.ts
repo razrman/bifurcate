@@ -63,12 +63,11 @@ export function patternFor(slow: number, dots: number): { beats: number; perBeat
   return { beats, perBeat };
 }
 
-const INSTRUMENTS = ["cymbal", "flute", "space", "violin", "guitar", "tom", "slap", "bass"] as const;
+const INSTRUMENTS = ["flute", "space", "violin", "guitar", "tom", "slap", "bass"] as const;
 type Kind = (typeof INSTRUMENTS)[number];
 type SampleKind = Exclude<Kind, "space" | "violin">;
 
 const SAMPLE_BASE: Record<SampleKind, number> = {
-  cymbal: 1,
   flute: 440,
   guitar: 220,
   tom: 110,
@@ -77,7 +76,6 @@ const SAMPLE_BASE: Record<SampleKind, number> = {
 };
 
 function rateFor(kind: SampleKind, freq: number): number {
-  if (kind === "cymbal") return Math.min(1.45, Math.max(0.75, 0.85 + freq / 1400));
   const rate = freq / SAMPLE_BASE[kind];
   if (kind === "tom") return Math.min(2.2, Math.max(0.45, rate));
   return Math.min(4, Math.max(0.25, rate));
@@ -86,7 +84,7 @@ function rateFor(kind: SampleKind, freq: number): number {
 export type VoiceBand = { kind: Kind; top: number; bottom: number };
 
 export function randomBands(): VoiceBand[] {
-  const min = 0.075;
+  const min = 0.08;
   const extra = 1 - min * INSTRUMENTS.length;
   const weights = INSTRUMENTS.map(() => Math.random());
   const sum = weights.reduce((total, weight) => total + weight, 0);
@@ -252,7 +250,7 @@ export class EdmEngine {
     src.playbackRate.setValueAtTime(rateFor(kind, freq), when);
     const gain = ctx.createGain();
     const hold =
-      kind === "cymbal" || kind === "flute" || kind === "guitar"
+      kind === "flute" || kind === "guitar"
         ? Math.max(0.22, beatSec * 0.95)
         : Math.max(0.05, Math.min(buffer.duration, beatSec * 0.9));
     gain.gain.setValueAtTime(Math.max(0.0001, vel * 2.4), when);
@@ -359,13 +357,6 @@ export class EdmEngine {
         const tone = Math.sin(2 * Math.PI * 440 * t * (1 + vib)) + 0.12 * Math.sin(2 * Math.PI * 880 * t);
         const breath = (rand() * 2 - 1) * 0.05;
         return (tone + breath) * env;
-      }),
-      cymbal: render(0.7, (t) => {
-        const partials = [317, 463, 733, 1049, 1481, 2099, 2711, 3541];
-        let sum = 0;
-        for (const hz of partials) sum += Math.sin(2 * Math.PI * hz * t) * Math.exp(-t * (1.6 + hz / 900));
-        const wash = (rand() * 2 - 1) * Math.exp(-t * 3.2);
-        return sum * 0.18 + wash * 0.35;
       }),
       tom: render(0.36, (t) => {
         const phase = 2 * Math.PI * (90 * t + (140 / 16) * (1 - Math.exp(-t * 16)));
