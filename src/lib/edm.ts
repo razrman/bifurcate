@@ -87,21 +87,76 @@ export function bandAt(y: number, bands: VoiceBand[]): VoiceBand {
   return found ?? bands[bands.length - 1];
 }
 
+function scaleSemi(index: number): number {
+  const octave = Math.floor(index / SCALE.length);
+  const scaleIndex = ((index % SCALE.length) + SCALE.length) % SCALE.length;
+  return SCALE[scaleIndex] + octave * 12;
+}
+
+function degreeToSemi(degree: number): number {
+  const base = Math.floor(degree);
+  const frac = degree - base;
+  return scaleSemi(base) * (1 - frac) + scaleSemi(base + 1) * frac;
+}
+
+function scaleNotesNear(semi: number): number[] {
+  const octave = Math.floor(semi / 12);
+  const notes: number[] = [];
+  for (let oct = octave - 3; oct <= octave + 3; oct++) {
+    for (const step of SCALE) notes.push(oct * 12 + step);
+  }
+  return notes;
+}
+
+function nearestScaleSemi(semi: number, low = -Infinity, high = Infinity): number {
+  let best = scaleSemi(0);
+  let bestDist = Infinity;
+  for (const candidate of scaleNotesNear(semi)) {
+    if (candidate < low - 1e-6 || candidate > high + 1e-6) continue;
+    const dist = Math.abs(candidate - semi);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+function stepScale(semi: number, direction: -1 | 1): number {
+  const notes = scaleNotesNear(semi).sort((a, b) => a - b);
+  if (direction < 0) {
+    const lower = notes.filter((note) => note < semi - 1e-6);
+    return lower.length ? lower[lower.length - 1] : semi;
+  }
+  const higher = notes.filter((note) => note > semi + 1e-6);
+  return higher.length ? higher[0] : semi;
+}
+
 export function freqFor(x: number, view: View, band?: { top: number; bottom: number }): number {
   const span = view.x1 - view.x0 || 1;
-  let y = Math.min(1, Math.max(0, (x - view.x0) / span));
+  const y = Math.min(1, Math.max(0, (x - view.x0) / span));
+  const degrees = SCALE.length * 3 - 1;
+  const semi = degreeToSemi(y * degrees);
+  let played = nearestScaleSemi(semi);
   if (band) {
-    const height = Math.max(1e-6, band.bottom - band.top);
-    const local = (y - band.top) / height;
-    const center = (band.top + band.bottom) / 2;
-    y = center + (local - 0.5) * height * 1.5;
+    const low = degreeToSemi(band.top * degrees);
+    const high = degreeToSemi(Math.min(1, band.bottom) * degrees);
+    const center = (low + high) / 2;
+    const half = Math.max(0, high - low) * 0.75;
+    let edgeLow = nearestScaleSemi(center - half);
+    let edgeHigh = nearestScaleSemi(center + half);
+    const target = Math.max(0, high - low) * 1.5;
+    let guard = 0;
+    while (edgeHigh - edgeLow + 0.25 < target && guard < 8) {
+      if (center - edgeLow <= edgeHigh - center) edgeLow = stepScale(edgeLow, -1);
+      else edgeHigh = stepScale(edgeHigh, 1);
+      guard += 1;
+    }
+    const width = high - low || 1;
+    const along = Math.min(1, Math.max(0, (semi - low) / width));
+    played = nearestScaleSemi(edgeLow + along * (edgeHigh - edgeLow), edgeLow, edgeHigh);
   }
-  const degrees = SCALE.length * 3;
-  const idx = Math.round(y * (degrees - 1));
-  const octave = Math.floor(idx / SCALE.length);
-  const scaleIndex = ((idx % SCALE.length) + SCALE.length) % SCALE.length;
-  const semi = SCALE[scaleIndex] + octave * 12;
-  const midi = 40 + semi;
+  const midi = 40 + played;
   return 440 * 2 ** ((midi - 69) / 12);
 }
 
