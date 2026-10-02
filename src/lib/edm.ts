@@ -363,20 +363,32 @@ export class EdmEngine {
   private kick(ctx: AudioContext, master: GainNode, when: number): void {
     const osc = ctx.createOscillator();
     osc.type = "sine";
-    osc.frequency.setValueAtTime(168, when);
-    osc.frequency.exponentialRampToValueAtTime(46, when + 0.1);
+    osc.frequency.setValueAtTime(78, when);
+    osc.frequency.exponentialRampToValueAtTime(30, when + 0.16);
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.7, when);
-    gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.14);
+    gain.gain.setValueAtTime(0.95, when);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.32);
     osc.connect(gain);
     gain.connect(master);
     osc.start(when);
-    osc.stop(when + 0.16);
+    osc.stop(when + 0.34);
+
+    const click = ctx.createOscillator();
+    click.type = "sine";
+    click.frequency.setValueAtTime(150, when);
+    click.frequency.exponentialRampToValueAtTime(50, when + 0.03);
+    const clickGain = ctx.createGain();
+    clickGain.gain.setValueAtTime(0.18, when);
+    clickGain.gain.exponentialRampToValueAtTime(0.0001, when + 0.04);
+    click.connect(clickGain);
+    clickGain.connect(master);
+    click.start(when);
+    click.stop(when + 0.05);
   }
 
   private hat(ctx: AudioContext, master: GainNode, when: number): void {
-    const n = Math.floor(ctx.sampleRate * 0.05);
-    if (!this.hatBuffer) {
+    const n = Math.floor(ctx.sampleRate * 0.08);
+    if (!this.hatBuffer || this.hatBuffer.length !== n) {
       this.hatBuffer = ctx.createBuffer(1, n, ctx.sampleRate);
       const data = this.hatBuffer.getChannelData(0);
       for (let i = 0; i < n; i++) data[i] = Math.random() * 2 - 1;
@@ -384,15 +396,16 @@ export class EdmEngine {
     const src = ctx.createBufferSource();
     src.buffer = this.hatBuffer;
     const bp = ctx.createBiquadFilter();
-    bp.type = "highpass";
-    bp.frequency.value = 7000;
+    bp.type = "bandpass";
+    bp.frequency.value = 2400;
+    bp.Q.value = 0.6;
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.08, when);
-    gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.04);
+    gain.gain.setValueAtTime(0.12, when);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.07);
     src.connect(bp);
     bp.connect(gain);
     gain.connect(master);
     src.start(when);
-    src.stop(when + 0.05);
+    src.stop(when + 0.08);
   }
 }
