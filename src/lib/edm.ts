@@ -268,12 +268,27 @@ export class EdmEngine {
     vel: number,
     kind: "space" | "violin",
   ): void {
-    const dur = kind === "space" ? 0.07 : 0.055;
-    const level = Math.max(0.05, vel * (kind === "space" ? 1.8 : 2));
+    if (kind === "violin") {
+      const osc = ctx.createOscillator();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(freq, when);
+      const gain = ctx.createGain();
+      const level = Math.max(0.04, vel * 0.55);
+      gain.gain.setValueAtTime(0.0001, when);
+      gain.gain.exponentialRampToValueAtTime(level, when + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.055);
+      osc.connect(gain);
+      gain.connect(master);
+      osc.start(when);
+      osc.stop(when + 0.07);
+      return;
+    }
+    const dur = 0.07;
+    const level = Math.max(0.05, vel * 1.8);
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.Q.value = kind === "space" ? 7 : 1.2;
-    const open = kind === "space" ? Math.min(6400, freq * 7) : Math.min(3200, freq * 5);
+    filter.Q.value = 7;
+    const open = Math.min(6400, freq * 7);
     filter.frequency.setValueAtTime(open, when);
     filter.frequency.exponentialRampToValueAtTime(Math.max(180, open * 0.35), when + dur);
     const gain = ctx.createGain();
@@ -282,17 +297,11 @@ export class EdmEngine {
     gain.gain.exponentialRampToValueAtTime(0.0001, when + dur);
     filter.connect(gain);
     gain.connect(master);
-    const specs =
-      kind === "space"
-        ? [
-            { type: "sawtooth" as OscillatorType, ratio: 1, detune: -14, mix: 0.34 },
-            { type: "sawtooth" as OscillatorType, ratio: 1, detune: 14, mix: 0.34 },
-            { type: "triangle" as OscillatorType, ratio: 2, detune: 0, mix: 0.16 },
-          ]
-        : [
-            { type: "sawtooth" as OscillatorType, ratio: 1, detune: -8, mix: 0.28 },
-            { type: "triangle" as OscillatorType, ratio: 1, detune: 6, mix: 0.34 },
-          ];
+    const specs = [
+      { type: "sawtooth" as OscillatorType, ratio: 1, detune: -14, mix: 0.34 },
+      { type: "sawtooth" as OscillatorType, ratio: 1, detune: 14, mix: 0.34 },
+      { type: "triangle" as OscillatorType, ratio: 2, detune: 0, mix: 0.16 },
+    ];
     for (const spec of specs) {
       const osc = ctx.createOscillator();
       osc.type = spec.type;
