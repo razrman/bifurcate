@@ -65,11 +65,10 @@ export function patternFor(slow: number, dots: number): { beats: number; perBeat
 
 const INSTRUMENTS = ["flute", "space", "violin", "guitar", "slap", "bass"] as const;
 type Kind = (typeof INSTRUMENTS)[number];
-type SampleKind = Exclude<Kind, "space" | "violin" | "guitar">;
+type SampleKind = Exclude<Kind, "space" | "violin" | "guitar" | "slap">;
 
 const SAMPLE_BASE: Record<SampleKind, number> = {
   flute: 440,
-  slap: 82,
   bass: 55,
 };
 
@@ -224,7 +223,8 @@ export class EdmEngine {
       const voice = bandAt(y, this.bands).kind;
       const freq = freqFor(x, view);
       if (voice === "space" || voice === "violin") this.playStaccato(ctx, master, when, freq, vel, voice);
-      else if (voice === "guitar") this.playSine(ctx, master, when, freq, vel, beatSec);
+      else if (voice === "guitar") this.playOsc(ctx, master, when, freq, vel, beatSec, "sine");
+      else if (voice === "slap") this.playOsc(ctx, master, when, freq, vel, beatSec, "square");
       else this.playSample(ctx, master, when, freq, vel, voice, beatSec);
     }
     return ys;
@@ -258,15 +258,23 @@ export class EdmEngine {
     src.stop(when + hold + 0.02);
   }
 
-  private playSine(ctx: AudioContext, master: GainNode, when: number, freq: number, vel: number, beatSec: number): void {
+  private playOsc(
+    ctx: AudioContext,
+    master: GainNode,
+    when: number,
+    freq: number,
+    vel: number,
+    beatSec: number,
+    type: "sine" | "square",
+  ): void {
     const osc = ctx.createOscillator();
-    osc.type = "sine";
+    osc.type = type;
     osc.frequency.setValueAtTime(freq, when);
     const gain = ctx.createGain();
-    const dur = Math.max(0.08, Math.min(0.22, beatSec * 0.9));
-    const level = Math.max(0.05, vel * 1.6);
+    const dur = type === "square" ? Math.max(0.05, Math.min(0.12, beatSec * 0.7)) : Math.max(0.08, Math.min(0.22, beatSec * 0.9));
+    const level = Math.max(0.04, vel * (type === "square" ? 0.55 : 1.6));
     gain.gain.setValueAtTime(0.0001, when);
-    gain.gain.exponentialRampToValueAtTime(level, when + 0.008);
+    gain.gain.exponentialRampToValueAtTime(level, when + 0.006);
     gain.gain.exponentialRampToValueAtTime(0.0001, when + dur);
     osc.connect(gain);
     gain.connect(master);
@@ -359,12 +367,6 @@ export class EdmEngine {
           Math.sin(2 * Math.PI * 55 * t) +
           0.12 * Math.sin(2 * Math.PI * 110 * t);
         return body * env;
-      }),
-      slap: render(0.24, (t) => {
-        const click = (rand() * 2 - 1) * Math.exp(-t * 90);
-        const pop = Math.sin(2 * Math.PI * 180 * t) * Math.exp(-t * 28);
-        const body = Math.sin(2 * Math.PI * 82 * t) * Math.exp(-t * 10);
-        return click * 0.7 + pop * 0.45 + body;
       }),
       flute: render(0.55, (t) => {
         const attack = Math.min(1, t / 0.07);
