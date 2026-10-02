@@ -63,22 +63,39 @@ export function patternFor(slow: number, dots: number): { beats: number; perBeat
   return { beats, perBeat };
 }
 
-const KINDS = ["saw", "square", "tri", "bell", "organ", "fm"] as const;
-type Kind = (typeof KINDS)[number];
+const INSTRUMENTS = ["cymbal", "flute", "woodblock", "guitar", "tom", "slap", "bass"] as const;
+type Kind = (typeof INSTRUMENTS)[number];
+
+const SAMPLE_BASE: Record<Kind, number> = {
+  cymbal: 1,
+  flute: 440,
+  woodblock: 740,
+  guitar: 220,
+  tom: 110,
+  slap: 82,
+  bass: 55,
+};
+
+function rateFor(kind: Kind, freq: number): number {
+  if (kind === "cymbal") return Math.min(1.45, Math.max(0.75, 0.85 + freq / 1400));
+  const rate = freq / SAMPLE_BASE[kind];
+  if (kind === "woodblock") return Math.min(1.7, Math.max(0.7, rate));
+  if (kind === "tom") return Math.min(2.2, Math.max(0.45, rate));
+  return Math.min(4, Math.max(0.25, rate));
+}
 
 export type VoiceBand = { kind: Kind; top: number; bottom: number };
 
 export function randomBands(): VoiceBand[] {
-  const kinds = [...KINDS].sort(() => Math.random() - 0.5);
-  const min = 0.09;
-  const extra = 1 - min * kinds.length;
-  const weights = kinds.map(() => Math.random());
+  const min = 0.08;
+  const extra = 1 - min * INSTRUMENTS.length;
+  const weights = INSTRUMENTS.map(() => Math.random());
   const sum = weights.reduce((total, weight) => total + weight, 0);
   let y = 0;
-  return kinds.map((kind, i) => {
+  return INSTRUMENTS.map((kind, i) => {
     const top = y;
     y += min + (extra * weights[i]) / sum;
-    return { kind, top, bottom: i === kinds.length - 1 ? 1 : y };
+    return { kind, top, bottom: i === INSTRUMENTS.length - 1 ? 1 : y };
   });
 }
 
@@ -112,6 +129,7 @@ export class EdmEngine {
   private step = 0;
   private running = false;
   private hatBuffer: AudioBuffer | null = null;
+  private samples: Partial<Record<Kind, AudioBuffer>> = {};
   private lastYs: number[] = [];
   private progress = 0;
   private smoothDots = 1;
@@ -137,6 +155,7 @@ export class EdmEngine {
     master.connect(comp);
     comp.connect(ctx.destination);
     this.master = master;
+    this.samples = this.buildSamples(ctx);
 
     const beatMs = (60 / 124 / 4) * 1000;
     this.step = 0;
@@ -155,7 +174,7 @@ export class EdmEngine {
       this.smoothDots = this.smoothDots * 0.8 + Math.max(1, dots.length) * 0.2;
       const slow = slowFor(this.smoothDots);
       const notes = patternFor(slow, dots.length).perBeat;
-      const ys = this.hit(when, this.step, this.progress, view, dots, notes);
+      const ys = this.hit(when, this.step, view, dots, notes);
       if (ys.length) this.lastYs = ys;
       this.step += 1;
       this.progress += 0.0045 / slow;
@@ -187,14 +206,7 @@ export class EdmEngine {
     if (ctx && ctx.state !== "closed") void ctx.close();
   }
 
-  private hit(
-    when: number,
-    step: number,
-    progress: number,
-    view: View,
-    dots: number[],
-    notes: number,
-  ): number[] {
+  private hit(when: number, step: number, view: View, dots: number[], notes: number): number[] {
     const ctx = this.ctx;
     const master = this.master;
     if (!ctx || !master) return [];
@@ -214,7 +226,7 @@ export class EdmEngine {
         ys.push(y);
       }
       const voice = bandAt(y, this.bands).kind;
-      this.tone(ctx, master, when, freqFor(x, view), progress, vel, voice, beatSec);
+      this.playSample(ctx, master, when, freqFor(x, view), vel, voice, beatSec);
     }
     return ys;
   }
@@ -223,66 +235,100 @@ export class EdmEngine {
     return this.bands.map(({ top, bottom }) => ({ top, bottom }));
   }
 
-  private tone(
+  private playSample(
     ctx: AudioContext,
     master: GainNode,
     when: number,
     freq: number,
-    progress: number,
     vel: number,
     kind: Kind,
     beatSec: number,
   ): void {
-    const dur = Math.min(kind === "bell" ? 0.12 : kind === "organ" ? 0.26 : 0.16, Math.max(0.06, beatSec * 0.9));
-    const osc = ctx.createOscillator();
-    osc.type = kind === "square" ? "square" : kind === "tri" || kind === "organ" ? "triangle" : kind === "saw" ? "sawtooth" : "sine";
-    const played = kind === "bell" ? freq * 2 : freq;
-    osc.frequency.setValueAtTime(played, when);
-
-    const filter = ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.Q.value = kind === "bell" ? 0.7 : 5;
-    const open = 700 + progress * 3800;
-    filter.frequency.setValueAtTime(Math.min(7000, open * 1.3), when);
-    filter.frequency.exponentialRampToValueAtTime(Math.max(200, open * 0.4), when + dur);
-
+    const buffer = this.samples[kind];
+    if (!buffer) return;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.playbackRate.setValueAtTime(rateFor(kind, freq), when);
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, when);
-    gain.gain.exponentialRampToValueAtTime(vel, when + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.0001, when + dur);
-
-    const extras: OscillatorNode[] = [];
-    if (kind === "saw" || kind === "square") {
-      const ghost = ctx.createOscillator();
-      ghost.type = osc.type;
-      ghost.frequency.setValueAtTime(played * 1.006, when);
-      ghost.connect(filter);
-      extras.push(ghost);
-    } else if (kind === "organ") {
-      const fifth = ctx.createOscillator();
-      fifth.type = "sine";
-      fifth.frequency.setValueAtTime(played * 1.5, when);
-      fifth.connect(filter);
-      extras.push(fifth);
-    } else if (kind === "fm") {
-      const mod = ctx.createOscillator();
-      const modGain = ctx.createGain();
-      mod.frequency.setValueAtTime(played * 2, when);
-      modGain.gain.setValueAtTime(played * 1.4, when);
-      mod.connect(modGain);
-      modGain.connect(osc.frequency);
-      extras.push(mod);
-    }
-
-    osc.connect(filter);
-    filter.connect(gain);
+    const hold =
+      kind === "cymbal" || kind === "flute" || kind === "guitar"
+        ? Math.max(0.22, beatSec * 0.95)
+        : Math.max(0.05, Math.min(buffer.duration, beatSec * 0.9));
+    gain.gain.setValueAtTime(Math.max(0.0001, vel * 2.4), when);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + hold);
+    src.connect(gain);
     gain.connect(master);
-    osc.start(when);
-    osc.stop(when + dur + 0.02);
-    for (const extra of extras) {
-      extra.start(when);
-      extra.stop(when + dur + 0.02);
-    }
+    src.start(when);
+    src.stop(when + hold + 0.02);
+  }
+
+  private buildSamples(ctx: AudioContext): Record<Kind, AudioBuffer> {
+    const sr = ctx.sampleRate;
+    const render = (seconds: number, fill: (t: number) => number) => {
+      const length = Math.max(1, Math.floor(sr * seconds));
+      const buffer = ctx.createBuffer(1, length, sr);
+      const data = buffer.getChannelData(0);
+      let peak = 0;
+      for (let i = 0; i < length; i++) {
+        const sample = fill(i / sr);
+        data[i] = sample;
+        peak = Math.max(peak, Math.abs(sample));
+      }
+      const gain = peak > 0 ? 0.85 / peak : 1;
+      for (let i = 0; i < length; i++) data[i] *= gain;
+      return buffer;
+    };
+    let noise = 0.2;
+    const rand = () => {
+      noise = (noise * 16807) % 2147483647;
+      return noise / 2147483647;
+    };
+    return {
+      guitar: render(0.46, (t) => {
+        const env = Math.exp(-t * 5.5) * (1 - Math.exp(-t * 90));
+        let sum = 0;
+        for (let h = 1; h <= 7; h++) sum += Math.sin(2 * Math.PI * 220 * h * t) / h;
+        return Math.tanh(sum * 1.6) * env;
+      }),
+      bass: render(0.42, (t) => {
+        const env = Math.exp(-t * 3.2) * (1 - Math.exp(-t * 120));
+        const body =
+          Math.sin(2 * Math.PI * 55 * t) +
+          0.28 * Math.sin(2 * Math.PI * 110 * t) +
+          0.06 * Math.sin(2 * Math.PI * 165 * t);
+        return body * env;
+      }),
+      slap: render(0.24, (t) => {
+        const click = (rand() * 2 - 1) * Math.exp(-t * 90);
+        const pop = Math.sin(2 * Math.PI * 180 * t) * Math.exp(-t * 28);
+        const body = Math.sin(2 * Math.PI * 82 * t) * Math.exp(-t * 10);
+        return click * 0.7 + pop * 0.45 + body;
+      }),
+      flute: render(0.55, (t) => {
+        const attack = Math.min(1, t / 0.07);
+        const env = attack * Math.exp(-t * 1.4);
+        const vib = Math.sin(2 * Math.PI * 5 * t) * 0.012;
+        const tone = Math.sin(2 * Math.PI * 440 * t * (1 + vib)) + 0.12 * Math.sin(2 * Math.PI * 880 * t);
+        const breath = (rand() * 2 - 1) * 0.05;
+        return (tone + breath) * env;
+      }),
+      cymbal: render(0.7, (t) => {
+        const partials = [317, 463, 733, 1049, 1481, 2099, 2711, 3541];
+        let sum = 0;
+        for (const hz of partials) sum += Math.sin(2 * Math.PI * hz * t) * Math.exp(-t * (1.6 + hz / 900));
+        const wash = (rand() * 2 - 1) * Math.exp(-t * 3.2);
+        return sum * 0.18 + wash * 0.35;
+      }),
+      tom: render(0.36, (t) => {
+        const phase = 2 * Math.PI * (90 * t + (140 / 16) * (1 - Math.exp(-t * 16)));
+        return Math.sin(phase) * Math.exp(-t * 6.5);
+      }),
+      woodblock: render(0.09, (t) => {
+        const knock = Math.sin(2 * Math.PI * 740 * t) * Math.exp(-t * 36);
+        const tick = Math.sin(2 * Math.PI * 1680 * t) * Math.exp(-t * 70);
+        return knock + tick * 0.35;
+      }),
+    };
   }
 
   private kick(ctx: AudioContext, master: GainNode, when: number): void {
