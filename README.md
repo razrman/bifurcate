@@ -8,7 +8,7 @@ x′ = r x (1 − x)
 
 Scroll or pinch to zoom, drag to pan, and double-click to zoom in. Reset returns to `r` 2.5–4 and `x` 0–1.
 
-**EDM** sweeps the diagram from left to right and plays it, then rewinds and repeats until you press **EDM** again. Pitch follows the height of the chosen points. The diagram covers about seven octaves. Each band is only a little wider than its height, so the voices overlap less. Denser columns add synth voices, stay on the column longer, and keep the beat at the same tempo. Each run splits the diagram into horizontal bands, and each voice only plays inside its band. The browser must allow audio (a click starts it).
+**EDM** sweeps the diagram from left to right and plays it, then rewinds and repeats until you press **EDM** again. Pitch follows the height of the chosen points, higher at the top of the diagram and lower at the bottom. The diagram covers about seven octaves. Each band is only a little wider than its height, so the voices overlap less. Denser columns add synth voices, stay on the column longer, and keep the beat at the same tempo. Each run splits the diagram into horizontal bands, and each voice only plays inside its band. The browser must allow audio (a click starts it).
 
 ## Run
 

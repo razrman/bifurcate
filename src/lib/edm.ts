@@ -138,13 +138,14 @@ function stepScale(semi: number, direction: -1 | 1): number {
 
 export function freqFor(x: number, view: View, band?: { top: number; bottom: number }): number {
   const span = view.x1 - view.x0 || 1;
-  const y = Math.min(1, Math.max(0, (x - view.x0) / span));
+  const screenY = Math.min(1, Math.max(0, (view.x1 - x) / span));
+  const pitchY = 1 - screenY;
   const degrees = SCALE.length * RANGE_OCTAVES - 1;
-  const semi = degreeToSemi(y * degrees);
+  const semi = degreeToSemi(pitchY * degrees);
   let played = nearestScaleSemi(semi);
   if (band) {
-    const low = degreeToSemi(band.top * degrees);
-    const high = degreeToSemi(Math.min(1, band.bottom) * degrees);
+    const low = degreeToSemi((1 - Math.min(1, band.bottom)) * degrees);
+    const high = degreeToSemi((1 - band.top) * degrees);
     const center = (low + high) / 2;
     const half = Math.max(0, high - low) * (BAND_STRETCH / 2);
     let edgeLow = nearestScaleSemi(center - half);
