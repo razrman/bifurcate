@@ -66,14 +66,6 @@ export function patternFor(slow: number, dots: number): { beats: number; perBeat
 const INSTRUMENTS = ["cymbal", "flute", "space", "violin", "guitar", "tom", "slap", "bass"] as const;
 type Kind = (typeof INSTRUMENTS)[number];
 type SampleKind = Exclude<Kind, "space" | "violin">;
-type LegatoKind = "space" | "violin";
-type LegatoSlot = {
-  parts: { osc: OscillatorNode; ratio: number }[];
-  filter: BiquadFilterNode;
-  gain: GainNode;
-  lfo: OscillatorNode;
-  freq: number;
-};
 
 const SAMPLE_BASE: Record<SampleKind, number> = {
   cymbal: 1,
@@ -137,7 +129,6 @@ export class EdmEngine {
   private running = false;
   private hatBuffer: AudioBuffer | null = null;
   private samples: Partial<Record<SampleKind, AudioBuffer>> = {};
-  private legatoVoices: Partial<Record<LegatoKind, LegatoSlot>> = {};
   private lastYs: number[] = [];
   private progress = 0;
   private smoothDots = 1;
@@ -164,7 +155,6 @@ export class EdmEngine {
     comp.connect(ctx.destination);
     this.master = master;
     this.samples = this.buildSamples(ctx);
-    this.legatoVoices = {};
 
     const beatMs = (60 / 124 / 4) * 1000;
     this.step = 0;
@@ -213,7 +203,6 @@ export class EdmEngine {
     this.ctx = null;
     this.master = null;
     this.samples = {};
-    this.legatoVoices = {};
     if (ctx && ctx.state !== "closed") void ctx.close();
   }
 
@@ -237,7 +226,7 @@ export class EdmEngine {
         ys.push(y);
       }
       const voice = bandAt(y, this.bands).kind;
-      if (voice === "space" || voice === "violin") this.playLegato(ctx, master, when, freqFor(x, view), vel, voice);
+      if (voice === "space" || voice === "violin") this.playStaccato(ctx, master, when, freqFor(x, view), vel, voice);
       else this.playSample(ctx, master, when, freqFor(x, view), vel, voice, beatSec);
     }
     return ys;
@@ -274,58 +263,26 @@ export class EdmEngine {
     src.stop(when + hold + 0.02);
   }
 
-  private playLegato(
+  private playStaccato(
     ctx: AudioContext,
     master: GainNode,
     when: number,
     freq: number,
     vel: number,
-    kind: LegatoKind,
+    kind: "space" | "violin",
   ): void {
-    const level = Math.max(0.05, vel * (kind === "space" ? 1.5 : 1.7));
-    const glide = 0.16;
-    let slot = this.legatoVoices[kind];
-    if (!slot) {
-      slot = this.openLegato(ctx, master, when, freq, kind);
-      this.legatoVoices[kind] = slot;
-    }
-    const heard = slot.gain.gain.value > 0.015;
-    slot.gain.gain.cancelScheduledValues(when);
-    if (!heard) {
-      slot.gain.gain.setValueAtTime(0.0001, when);
-      slot.gain.gain.exponentialRampToValueAtTime(level, when + 0.2);
-    } else {
-      slot.gain.gain.setValueAtTime(Math.max(0.0001, slot.gain.gain.value), when);
-      slot.gain.gain.linearRampToValueAtTime(level, when + 0.04);
-    }
-    for (const part of slot.parts) {
-      part.osc.frequency.cancelScheduledValues(when);
-      part.osc.frequency.setValueAtTime(Math.max(30, slot.freq * part.ratio), when);
-      part.osc.frequency.linearRampToValueAtTime(Math.max(30, freq * part.ratio), when + glide);
-    }
-    const filterNow = Math.max(180, kind === "space" ? slot.freq * 5 : slot.freq * 6);
-    const filterNext = Math.max(180, kind === "space" ? Math.min(5200, freq * 5) : Math.min(2800, freq * 6));
-    slot.filter.frequency.cancelScheduledValues(when);
-    slot.filter.frequency.setValueAtTime(filterNow, when);
-    slot.filter.frequency.linearRampToValueAtTime(filterNext, when + glide);
-    slot.freq = freq;
-    slot.gain.gain.setValueAtTime(level, when + glide);
-    slot.gain.gain.exponentialRampToValueAtTime(0.0001, when + glide + 0.45);
-  }
-
-  private openLegato(
-    ctx: AudioContext,
-    master: GainNode,
-    when: number,
-    freq: number,
-    kind: LegatoKind,
-  ): LegatoSlot {
+    const dur = kind === "space" ? 0.07 : 0.055;
+    const level = Math.max(0.05, vel * (kind === "space" ? 1.8 : 2));
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.Q.value = kind === "space" ? 6.5 : 0.7;
-    filter.frequency.setValueAtTime(kind === "space" ? freq * 5 : 2200, when);
+    filter.Q.value = kind === "space" ? 7 : 1.2;
+    const open = kind === "space" ? Math.min(6400, freq * 7) : Math.min(3200, freq * 5);
+    filter.frequency.setValueAtTime(open, when);
+    filter.frequency.exponentialRampToValueAtTime(Math.max(180, open * 0.35), when + dur);
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, when);
+    gain.gain.exponentialRampToValueAtTime(level, when + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + dur);
     filter.connect(gain);
     gain.connect(master);
     const specs =
@@ -333,14 +290,13 @@ export class EdmEngine {
         ? [
             { type: "sawtooth" as OscillatorType, ratio: 1, detune: -14, mix: 0.34 },
             { type: "sawtooth" as OscillatorType, ratio: 1, detune: 14, mix: 0.34 },
-            { type: "triangle" as OscillatorType, ratio: 2, detune: 0, mix: 0.12 },
+            { type: "triangle" as OscillatorType, ratio: 2, detune: 0, mix: 0.16 },
           ]
         : [
-            { type: "sawtooth" as OscillatorType, ratio: 1, detune: -7, mix: 0.2 },
-            { type: "sawtooth" as OscillatorType, ratio: 1, detune: 7, mix: 0.2 },
-            { type: "triangle" as OscillatorType, ratio: 1, detune: 0, mix: 0.32 },
+            { type: "sawtooth" as OscillatorType, ratio: 1, detune: -8, mix: 0.28 },
+            { type: "triangle" as OscillatorType, ratio: 1, detune: 6, mix: 0.34 },
           ];
-    const parts = specs.map((spec) => {
+    for (const spec of specs) {
       const osc = ctx.createOscillator();
       osc.type = spec.type;
       osc.frequency.setValueAtTime(freq * spec.ratio, when);
@@ -350,23 +306,8 @@ export class EdmEngine {
       osc.connect(mix);
       mix.connect(filter);
       osc.start(when);
-      return { osc, ratio: spec.ratio };
-    });
-    const lfo = ctx.createOscillator();
-    const depth = ctx.createGain();
-    if (kind === "violin") {
-      lfo.frequency.value = 5.1;
-      depth.gain.value = 5;
-      lfo.connect(depth);
-      for (const part of parts) depth.connect(part.osc.frequency);
-    } else {
-      lfo.frequency.value = 0.18;
-      depth.gain.value = 700;
-      lfo.connect(depth);
-      depth.connect(filter.frequency);
+      osc.stop(when + dur + 0.02);
     }
-    lfo.start(when);
-    return { parts, filter, gain, lfo, freq };
   }
 
   private buildSamples(ctx: AudioContext): Record<SampleKind, AudioBuffer> {
