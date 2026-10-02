@@ -87,12 +87,20 @@ export function bandAt(y: number, bands: VoiceBand[]): VoiceBand {
   return found ?? bands[bands.length - 1];
 }
 
-export function freqFor(x: number, view: View): number {
+export function freqFor(x: number, view: View, band?: { top: number; bottom: number }): number {
   const span = view.x1 - view.x0 || 1;
-  const y = Math.min(1, Math.max(0, (x - view.x0) / span));
+  let y = Math.min(1, Math.max(0, (x - view.x0) / span));
+  if (band) {
+    const height = Math.max(1e-6, band.bottom - band.top);
+    const local = (y - band.top) / height;
+    const center = (band.top + band.bottom) / 2;
+    y = center + (local - 0.5) * height * 1.5;
+  }
   const degrees = SCALE.length * 3;
   const idx = Math.round(y * (degrees - 1));
-  const semi = SCALE[idx % SCALE.length] + Math.floor(idx / SCALE.length) * 12;
+  const octave = Math.floor(idx / SCALE.length);
+  const scaleIndex = ((idx % SCALE.length) + SCALE.length) % SCALE.length;
+  const semi = SCALE[scaleIndex] + octave * 12;
   const midi = 40 + semi;
   return 440 * 2 ** ((midi - 69) / 12);
 }
@@ -206,8 +214,8 @@ export class EdmEngine {
         seen.add(key);
         ys.push(y);
       }
-      const voice = bandAt(y, this.bands).kind;
-      this.tone(ctx, master, when, freqFor(x, view), this.progress, vel, voice, beatSec);
+      const voice = bandAt(y, this.bands);
+      this.tone(ctx, master, when, freqFor(x, view, voice), this.progress, vel, voice.kind, beatSec);
     }
     return ys;
   }
