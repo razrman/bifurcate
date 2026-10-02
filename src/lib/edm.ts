@@ -117,6 +117,7 @@ export type EdmTick = {
 export class EdmEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  private drums: GainNode | null = null;
   private timer = 0;
   private step = 0;
   private running = false;
@@ -147,6 +148,10 @@ export class EdmEngine {
     master.connect(comp);
     comp.connect(ctx.destination);
     this.master = master;
+    const drums = ctx.createGain();
+    drums.gain.value = 0.08;
+    drums.connect(master);
+    this.drums = drums;
     this.samples = this.buildSamples(ctx);
 
     const beatMs = (60 / 124 / 4) * 1000;
@@ -195,6 +200,7 @@ export class EdmEngine {
     const ctx = this.ctx;
     this.ctx = null;
     this.master = null;
+    this.drums = null;
     this.samples = {};
     if (ctx && ctx.state !== "closed") void ctx.close();
   }
@@ -205,12 +211,13 @@ export class EdmEngine {
     if (!ctx || !master) return [];
     const beatSec = 60 / 124 / 4;
     const span = view.x1 - view.x0 || 1;
-    const vel = notes > 0 ? 0.15 / Math.sqrt(notes) : 0;
+    const vel = notes > 0 ? 0.28 / Math.sqrt(notes) : 0;
     const ys: number[] = [];
     const seen = new Set<number>();
     const playlist = scatterDots(dots, view, Math.min(dots.length, notes));
-    if (step % 4 === 0) this.kick(ctx, master, when);
-    else if (step % 2 === 1) this.hat(ctx, master, when);
+    const drums = this.drums ?? master;
+    if (step % 4 === 0) this.kick(ctx, drums, when);
+    else if (step % 2 === 1) this.hat(ctx, drums, when);
     for (const x of playlist) {
       const y = (view.x1 - x) / span;
       const key = Math.round(y * 1000);
@@ -249,7 +256,7 @@ export class EdmEngine {
     src.playbackRate.setValueAtTime(rateFor(kind, freq), when);
     const gain = ctx.createGain();
     const hold = Math.max(0.22, beatSec * 0.95);
-    gain.gain.setValueAtTime(Math.max(0.0001, vel * 6), when);
+    gain.gain.setValueAtTime(Math.max(0.0001, vel * 12), when);
     gain.gain.exponentialRampToValueAtTime(0.0001, when + hold);
     src.connect(gain);
     gain.connect(master);
@@ -271,7 +278,7 @@ export class EdmEngine {
     osc.frequency.setValueAtTime(freq, when);
     const gain = ctx.createGain();
     const dur = type === "square" ? Math.max(0.05, Math.min(0.12, beatSec * 0.7)) : Math.max(0.08, Math.min(0.22, beatSec * 0.9));
-    const level = Math.max(0.04, vel * (type === "square" ? 0.55 : 1.6));
+    const level = Math.max(0.04, vel * (type === "square" ? 1.6 : 3));
     gain.gain.setValueAtTime(0.0001, when);
     gain.gain.exponentialRampToValueAtTime(level, when + 0.006);
     gain.gain.exponentialRampToValueAtTime(0.0001, when + dur);
@@ -284,7 +291,7 @@ export class EdmEngine {
   private playBass(ctx: AudioContext, master: GainNode, when: number, freq: number, vel: number): void {
     const note = Math.max(32, freq / 2);
     const dur = 0.26;
-    const level = Math.max(0.06, vel * 1.8);
+    const level = Math.max(0.06, vel * 3.2);
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.Q.setValueAtTime(14, when);
@@ -333,7 +340,7 @@ export class EdmEngine {
       osc.type = "sawtooth";
       osc.frequency.setValueAtTime(freq, when);
       const gain = ctx.createGain();
-      const level = Math.max(0.04, vel * 0.55);
+      const level = Math.max(0.04, vel * 1.6);
       gain.gain.setValueAtTime(0.0001, when);
       gain.gain.exponentialRampToValueAtTime(level, when + 0.004);
       gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.055);
@@ -344,7 +351,7 @@ export class EdmEngine {
       return;
     }
     const dur = 0.07;
-    const level = Math.max(0.05, vel * 1.8);
+    const level = Math.max(0.05, vel * 3.2);
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.Q.value = 7;
@@ -413,14 +420,14 @@ export class EdmEngine {
     const osc = ctx.createOscillator();
     osc.type = "sine";
     osc.frequency.setValueAtTime(78, when);
-    osc.frequency.exponentialRampToValueAtTime(30, when + 0.16);
+    osc.frequency.exponentialRampToValueAtTime(36, when + 0.08);
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.025, when);
-    gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.32);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.14);
     osc.connect(gain);
     gain.connect(master);
     osc.start(when);
-    osc.stop(when + 0.34);
+    osc.stop(when + 0.16);
 
     const click = ctx.createOscillator();
     click.type = "sine";
