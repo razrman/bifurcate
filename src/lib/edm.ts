@@ -415,7 +415,7 @@ export class EdmEngine {
     osc.frequency.setValueAtTime(78, when);
     osc.frequency.exponentialRampToValueAtTime(30, when + 0.16);
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.32, when);
+    gain.gain.setValueAtTime(0.1, when);
     gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.32);
     osc.connect(gain);
     gain.connect(master);
@@ -427,7 +427,7 @@ export class EdmEngine {
     click.frequency.setValueAtTime(150, when);
     click.frequency.exponentialRampToValueAtTime(50, when + 0.03);
     const clickGain = ctx.createGain();
-    clickGain.gain.setValueAtTime(0.06, when);
+    clickGain.gain.setValueAtTime(0.02, when);
     clickGain.gain.exponentialRampToValueAtTime(0.0001, when + 0.04);
     click.connect(clickGain);
     clickGain.connect(master);
@@ -449,7 +449,7 @@ export class EdmEngine {
     bp.frequency.value = 2400;
     bp.Q.value = 0.6;
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.05, when);
+    gain.gain.setValueAtTime(0.018, when);
     gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.07);
     src.connect(bp);
     bp.connect(gain);
