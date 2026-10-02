@@ -87,6 +87,10 @@ export function bandAt(y: number, bands: VoiceBand[]): VoiceBand {
   return found ?? bands[bands.length - 1];
 }
 
+const RANGE_OCTAVES = 6;
+const MIDI_ROOT = 28;
+const BAND_STRETCH = 1.2;
+
 function scaleSemi(index: number): number {
   const octave = Math.floor(index / SCALE.length);
   const scaleIndex = ((index % SCALE.length) + SCALE.length) % SCALE.length;
@@ -135,17 +139,17 @@ function stepScale(semi: number, direction: -1 | 1): number {
 export function freqFor(x: number, view: View, band?: { top: number; bottom: number }): number {
   const span = view.x1 - view.x0 || 1;
   const y = Math.min(1, Math.max(0, (x - view.x0) / span));
-  const degrees = SCALE.length * 3 - 1;
+  const degrees = SCALE.length * RANGE_OCTAVES - 1;
   const semi = degreeToSemi(y * degrees);
   let played = nearestScaleSemi(semi);
   if (band) {
     const low = degreeToSemi(band.top * degrees);
     const high = degreeToSemi(Math.min(1, band.bottom) * degrees);
     const center = (low + high) / 2;
-    const half = Math.max(0, high - low);
+    const half = Math.max(0, high - low) * (BAND_STRETCH / 2);
     let edgeLow = nearestScaleSemi(center - half);
     let edgeHigh = nearestScaleSemi(center + half);
-    const target = Math.max(0, high - low) * 2;
+    const target = Math.max(0, high - low) * BAND_STRETCH;
     let guard = 0;
     while (edgeHigh - edgeLow + 0.25 < target && guard < 8) {
       if (center - edgeLow <= edgeHigh - center) edgeLow = stepScale(edgeLow, -1);
@@ -156,7 +160,7 @@ export function freqFor(x: number, view: View, band?: { top: number; bottom: num
     const along = Math.min(1, Math.max(0, (semi - low) / width));
     played = nearestScaleSemi(edgeLow + along * (edgeHigh - edgeLow), edgeLow, edgeHigh);
   }
-  const midi = 40 + played;
+  const midi = MIDI_ROOT + played;
   return 440 * 2 ** ((midi - 69) / 12);
 }
 
