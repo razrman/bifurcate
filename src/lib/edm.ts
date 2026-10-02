@@ -63,21 +63,19 @@ export function patternFor(slow: number, dots: number): { beats: number; perBeat
   return { beats, perBeat };
 }
 
-const INSTRUMENTS = ["flute", "space", "violin", "guitar", "tom", "slap", "bass"] as const;
+const INSTRUMENTS = ["flute", "space", "violin", "guitar", "slap", "bass"] as const;
 type Kind = (typeof INSTRUMENTS)[number];
 type SampleKind = Exclude<Kind, "space" | "violin">;
 
 const SAMPLE_BASE: Record<SampleKind, number> = {
   flute: 440,
   guitar: 220,
-  tom: 110,
   slap: 82,
   bass: 55,
 };
 
 function rateFor(kind: SampleKind, freq: number): number {
   const rate = freq / SAMPLE_BASE[kind];
-  if (kind === "tom") return Math.min(2.2, Math.max(0.45, rate));
   return Math.min(4, Math.max(0.25, rate));
 }
 
@@ -357,10 +355,6 @@ export class EdmEngine {
         const tone = Math.sin(2 * Math.PI * 440 * t * (1 + vib)) + 0.12 * Math.sin(2 * Math.PI * 880 * t);
         const breath = (rand() * 2 - 1) * 0.05;
         return (tone + breath) * env;
-      }),
-      tom: render(0.36, (t) => {
-        const phase = 2 * Math.PI * (90 * t + (140 / 16) * (1 - Math.exp(-t * 16)));
-        return Math.sin(phase) * Math.exp(-t * 6.5);
       }),
     };
   }
