@@ -160,10 +160,9 @@ export class EdmEngine {
       this.step += 1;
       this.progress += 0.0045 / slow;
       if (this.progress >= 1) {
-        this.running = false;
-        this.onTick?.({ progress: 1, ys: [], beats: 1, bands: this.bandEdges(), done: true });
-        this.timer = window.setTimeout(() => this.stop(), 450);
-        return;
+        this.progress = 0;
+        this.smoothDots = 1;
+        this.lastYs = [];
       }
       this.onTick?.({
         progress: this.progress,
