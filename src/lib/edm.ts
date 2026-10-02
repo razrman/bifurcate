@@ -249,7 +249,7 @@ export class EdmEngine {
     src.playbackRate.setValueAtTime(rateFor(kind, freq), when);
     const gain = ctx.createGain();
     const hold = Math.max(0.22, beatSec * 0.95);
-    gain.gain.setValueAtTime(Math.max(0.0001, vel * 2.4), when);
+    gain.gain.setValueAtTime(Math.max(0.0001, vel * 6), when);
     gain.gain.exponentialRampToValueAtTime(0.0001, when + hold);
     src.connect(gain);
     gain.connect(master);
