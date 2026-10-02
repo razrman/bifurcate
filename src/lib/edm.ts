@@ -63,35 +63,22 @@ export function patternFor(slow: number, dots: number): { beats: number; perBeat
   return { beats, perBeat };
 }
 
-const INSTRUMENTS = ["flute", "space", "violin", "guitar", "slap", "bass"] as const;
-type Kind = (typeof INSTRUMENTS)[number];
-type SampleKind = Exclude<Kind, "space" | "violin">;
-
-const SAMPLE_BASE: Record<SampleKind, number> = {
-  flute: 440,
-  guitar: 220,
-  slap: 82,
-  bass: 55,
-};
-
-function rateFor(kind: SampleKind, freq: number): number {
-  const played = kind === "bass" ? freq / 2 : freq;
-  const rate = played / SAMPLE_BASE[kind];
-  return Math.min(4, Math.max(0.2, rate));
-}
+const KINDS = ["saw", "square", "tri", "bell", "organ", "fm"] as const;
+type Kind = (typeof KINDS)[number];
 
 export type VoiceBand = { kind: Kind; top: number; bottom: number };
 
 export function randomBands(): VoiceBand[] {
-  const min = 0.08;
-  const extra = 1 - min * INSTRUMENTS.length;
-  const weights = INSTRUMENTS.map(() => Math.random());
+  const kinds = [...KINDS].sort(() => Math.random() - 0.5);
+  const min = 0.09;
+  const extra = 1 - min * kinds.length;
+  const weights = kinds.map(() => Math.random());
   const sum = weights.reduce((total, weight) => total + weight, 0);
   let y = 0;
-  return INSTRUMENTS.map((kind, i) => {
+  return kinds.map((kind, i) => {
     const top = y;
     y += min + (extra * weights[i]) / sum;
-    return { kind, top, bottom: i === INSTRUMENTS.length - 1 ? 1 : y };
+    return { kind, top, bottom: i === kinds.length - 1 ? 1 : y };
   });
 }
 
@@ -121,12 +108,10 @@ export type EdmTick = {
 export class EdmEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
-  private drums: GainNode | null = null;
   private timer = 0;
   private step = 0;
   private running = false;
   private hatBuffer: AudioBuffer | null = null;
-  private samples: Partial<Record<SampleKind, AudioBuffer>> = {};
   private lastYs: number[] = [];
   private progress = 0;
   private smoothDots = 1;
@@ -152,11 +137,6 @@ export class EdmEngine {
     master.connect(comp);
     comp.connect(ctx.destination);
     this.master = master;
-    const drums = ctx.createGain();
-    drums.gain.value = 0.08;
-    drums.connect(master);
-    this.drums = drums;
-    this.samples = this.buildSamples(ctx);
 
     const beatMs = (60 / 124 / 4) * 1000;
     this.step = 0;
@@ -204,8 +184,6 @@ export class EdmEngine {
     const ctx = this.ctx;
     this.ctx = null;
     this.master = null;
-    this.drums = null;
-    this.samples = {};
     if (ctx && ctx.state !== "closed") void ctx.close();
   }
 
@@ -215,13 +193,12 @@ export class EdmEngine {
     if (!ctx || !master) return [];
     const beatSec = 60 / 124 / 4;
     const span = view.x1 - view.x0 || 1;
-    const vel = notes > 0 ? 0.28 / Math.sqrt(notes) : 0;
+    const vel = notes > 0 ? 0.15 / Math.sqrt(notes) : 0;
     const ys: number[] = [];
     const seen = new Set<number>();
     const playlist = scatterDots(dots, view, Math.min(dots.length, notes));
-    const drums = this.drums ?? master;
-    if (step % 4 === 0) this.kick(ctx, drums, when);
-    else if (step % 2 === 1) this.hat(ctx, drums, when);
+    if (step % 4 === 0) this.kick(ctx, master, when);
+    else if (step % 2 === 1) this.hat(ctx, master, when);
     for (const x of playlist) {
       const y = (view.x1 - x) / span;
       const key = Math.round(y * 1000);
@@ -230,8 +207,7 @@ export class EdmEngine {
         ys.push(y);
       }
       const voice = bandAt(y, this.bands).kind;
-      if (voice === "space" || voice === "violin") this.playStaccato(ctx, master, when, freqFor(x, view), vel, voice);
-      else this.playSample(ctx, master, when, freqFor(x, view), vel, voice, beatSec);
+      this.tone(ctx, master, when, freqFor(x, view), this.progress, vel, voice, beatSec);
     }
     return ys;
   }
@@ -240,164 +216,85 @@ export class EdmEngine {
     return this.bands.map(({ top, bottom }) => ({ top, bottom }));
   }
 
-  private playSample(
+  private tone(
     ctx: AudioContext,
     master: GainNode,
     when: number,
     freq: number,
+    progress: number,
     vel: number,
-    kind: SampleKind,
+    kind: Kind,
     beatSec: number,
   ): void {
-    const buffer = this.samples[kind];
-    if (!buffer) return;
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.playbackRate.setValueAtTime(rateFor(kind, freq), when);
-    const gain = ctx.createGain();
-    const hold =
-      kind === "flute" || kind === "guitar"
-        ? Math.max(0.22, beatSec * 0.95)
-        : Math.max(0.05, Math.min(buffer.duration, beatSec * 0.9));
-    const level =
-      kind === "flute" ? 12 : kind === "guitar" ? 6 : kind === "bass" ? 7 : 5;
-    gain.gain.setValueAtTime(Math.max(0.0001, vel * level), when);
-    gain.gain.exponentialRampToValueAtTime(0.0001, when + hold);
-    src.connect(gain);
-    gain.connect(master);
-    src.start(when);
-    src.stop(when + hold + 0.02);
-  }
+    const dur = Math.min(kind === "bell" ? 0.12 : kind === "organ" ? 0.26 : 0.16, Math.max(0.06, beatSec * 0.9));
+    const osc = ctx.createOscillator();
+    osc.type = kind === "square" ? "square" : kind === "tri" || kind === "organ" ? "triangle" : kind === "saw" ? "sawtooth" : "sine";
+    const played = kind === "bell" ? freq * 2 : freq;
+    osc.frequency.setValueAtTime(played, when);
 
-  private playStaccato(
-    ctx: AudioContext,
-    master: GainNode,
-    when: number,
-    freq: number,
-    vel: number,
-    kind: "space" | "violin",
-  ): void {
-    const dur = kind === "space" ? 0.07 : 0.055;
-    const level = Math.max(0.05, vel * 3.2);
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.Q.value = kind === "space" ? 7 : 1.2;
-    const open = kind === "space" ? Math.min(6400, freq * 7) : Math.min(3200, freq * 5);
-    filter.frequency.setValueAtTime(open, when);
-    filter.frequency.exponentialRampToValueAtTime(Math.max(180, open * 0.35), when + dur);
+    filter.Q.value = kind === "bell" ? 0.7 : 5;
+    const open = 700 + progress * 3800;
+    filter.frequency.setValueAtTime(Math.min(7000, open * 1.3), when);
+    filter.frequency.exponentialRampToValueAtTime(Math.max(200, open * 0.4), when + dur);
+
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, when);
-    gain.gain.exponentialRampToValueAtTime(level, when + 0.006);
+    gain.gain.exponentialRampToValueAtTime(vel, when + 0.012);
     gain.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+
+    const extras: OscillatorNode[] = [];
+    if (kind === "saw" || kind === "square") {
+      const ghost = ctx.createOscillator();
+      ghost.type = osc.type;
+      ghost.frequency.setValueAtTime(played * 1.006, when);
+      ghost.connect(filter);
+      extras.push(ghost);
+    } else if (kind === "organ") {
+      const fifth = ctx.createOscillator();
+      fifth.type = "sine";
+      fifth.frequency.setValueAtTime(played * 1.5, when);
+      fifth.connect(filter);
+      extras.push(fifth);
+    } else if (kind === "fm") {
+      const mod = ctx.createOscillator();
+      const modGain = ctx.createGain();
+      mod.frequency.setValueAtTime(played * 2, when);
+      modGain.gain.setValueAtTime(played * 1.4, when);
+      mod.connect(modGain);
+      modGain.connect(osc.frequency);
+      extras.push(mod);
+    }
+
+    osc.connect(filter);
     filter.connect(gain);
     gain.connect(master);
-    const specs =
-      kind === "space"
-        ? [
-            { type: "sawtooth" as OscillatorType, ratio: 1, detune: -14, mix: 0.34 },
-            { type: "sawtooth" as OscillatorType, ratio: 1, detune: 14, mix: 0.34 },
-            { type: "triangle" as OscillatorType, ratio: 2, detune: 0, mix: 0.16 },
-          ]
-        : [
-            { type: "sawtooth" as OscillatorType, ratio: 1, detune: -8, mix: 0.28 },
-            { type: "triangle" as OscillatorType, ratio: 1, detune: 6, mix: 0.34 },
-          ];
-    for (const spec of specs) {
-      const osc = ctx.createOscillator();
-      osc.type = spec.type;
-      osc.frequency.setValueAtTime(freq * spec.ratio, when);
-      osc.detune.setValueAtTime(spec.detune, when);
-      const mix = ctx.createGain();
-      mix.gain.value = spec.mix;
-      osc.connect(mix);
-      mix.connect(filter);
-      osc.start(when);
-      osc.stop(when + dur + 0.02);
+    osc.start(when);
+    osc.stop(when + dur + 0.02);
+    for (const extra of extras) {
+      extra.start(when);
+      extra.stop(when + dur + 0.02);
     }
-  }
-
-  private buildSamples(ctx: AudioContext): Record<SampleKind, AudioBuffer> {
-    const sr = ctx.sampleRate;
-    const render = (seconds: number, fill: (t: number) => number) => {
-      const length = Math.max(1, Math.floor(sr * seconds));
-      const buffer = ctx.createBuffer(1, length, sr);
-      const data = buffer.getChannelData(0);
-      let peak = 0;
-      for (let i = 0; i < length; i++) {
-        const sample = fill(i / sr);
-        data[i] = sample;
-        peak = Math.max(peak, Math.abs(sample));
-      }
-      const gain = peak > 0 ? 0.85 / peak : 1;
-      for (let i = 0; i < length; i++) data[i] *= gain;
-      return buffer;
-    };
-    let noise = 0.2;
-    const rand = () => {
-      noise = (noise * 16807) % 2147483647;
-      return noise / 2147483647;
-    };
-    return {
-      guitar: render(0.46, (t) => {
-        const env = Math.exp(-t * 5.5) * (1 - Math.exp(-t * 90));
-        let sum = 0;
-        for (let h = 1; h <= 7; h++) sum += Math.sin(2 * Math.PI * 220 * h * t) / h;
-        return Math.tanh(sum * 1.6) * env;
-      }),
-      bass: render(0.55, (t) => {
-        const env = Math.exp(-t * 2.4) * (1 - Math.exp(-t * 80));
-        const body =
-          0.55 * Math.sin(2 * Math.PI * 27.5 * t) +
-          Math.sin(2 * Math.PI * 55 * t) +
-          0.12 * Math.sin(2 * Math.PI * 110 * t);
-        return body * env;
-      }),
-      slap: render(0.24, (t) => {
-        const click = (rand() * 2 - 1) * Math.exp(-t * 90);
-        const pop = Math.sin(2 * Math.PI * 180 * t) * Math.exp(-t * 28);
-        const body = Math.sin(2 * Math.PI * 82 * t) * Math.exp(-t * 10);
-        return click * 0.7 + pop * 0.45 + body;
-      }),
-      flute: render(0.55, (t) => {
-        const attack = Math.min(1, t / 0.07);
-        const env = attack * Math.exp(-t * 1.4);
-        const vib = Math.sin(2 * Math.PI * 5 * t) * 0.012;
-        const tone = Math.sin(2 * Math.PI * 440 * t * (1 + vib)) + 0.12 * Math.sin(2 * Math.PI * 880 * t);
-        const breath = (rand() * 2 - 1) * 0.05;
-        return (tone + breath) * env;
-      }),
-    };
   }
 
   private kick(ctx: AudioContext, master: GainNode, when: number): void {
     const osc = ctx.createOscillator();
     osc.type = "sine";
-    osc.frequency.setValueAtTime(78, when);
-    osc.frequency.exponentialRampToValueAtTime(30, when + 0.16);
+    osc.frequency.setValueAtTime(168, when);
+    osc.frequency.exponentialRampToValueAtTime(46, when + 0.1);
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.2, when);
-    gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.32);
+    gain.gain.setValueAtTime(0.7, when);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.14);
     osc.connect(gain);
     gain.connect(master);
     osc.start(when);
-    osc.stop(when + 0.34);
-
-    const click = ctx.createOscillator();
-    click.type = "sine";
-    click.frequency.setValueAtTime(150, when);
-    click.frequency.exponentialRampToValueAtTime(50, when + 0.03);
-    const clickGain = ctx.createGain();
-    clickGain.gain.setValueAtTime(0.04, when);
-    clickGain.gain.exponentialRampToValueAtTime(0.0001, when + 0.04);
-    click.connect(clickGain);
-    clickGain.connect(master);
-    click.start(when);
-    click.stop(when + 0.05);
+    osc.stop(when + 0.16);
   }
 
   private hat(ctx: AudioContext, master: GainNode, when: number): void {
-    const n = Math.floor(ctx.sampleRate * 0.08);
-    if (!this.hatBuffer || this.hatBuffer.length !== n) {
+    const n = Math.floor(ctx.sampleRate * 0.05);
+    if (!this.hatBuffer) {
       this.hatBuffer = ctx.createBuffer(1, n, ctx.sampleRate);
       const data = this.hatBuffer.getChannelData(0);
       for (let i = 0; i < n; i++) data[i] = Math.random() * 2 - 1;
@@ -405,16 +302,15 @@ export class EdmEngine {
     const src = ctx.createBufferSource();
     src.buffer = this.hatBuffer;
     const bp = ctx.createBiquadFilter();
-    bp.type = "bandpass";
-    bp.frequency.value = 2400;
-    bp.Q.value = 0.6;
+    bp.type = "highpass";
+    bp.frequency.value = 7000;
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.03, when);
-    gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.07);
+    gain.gain.setValueAtTime(0.08, when);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.04);
     src.connect(bp);
     bp.connect(gain);
     gain.connect(master);
     src.start(when);
-    src.stop(when + 0.08);
+    src.stop(when + 0.05);
   }
 }
