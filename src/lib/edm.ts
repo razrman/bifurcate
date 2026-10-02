@@ -65,11 +65,10 @@ export function patternFor(slow: number, dots: number): { beats: number; perBeat
 
 const INSTRUMENTS = ["flute", "space", "violin", "guitar", "slap", "bass"] as const;
 type Kind = (typeof INSTRUMENTS)[number];
-type SampleKind = Exclude<Kind, "space" | "violin">;
+type SampleKind = Exclude<Kind, "space" | "violin" | "guitar">;
 
 const SAMPLE_BASE: Record<SampleKind, number> = {
   flute: 440,
-  guitar: 220,
   slap: 82,
   bass: 55,
 };
@@ -223,8 +222,10 @@ export class EdmEngine {
         ys.push(y);
       }
       const voice = bandAt(y, this.bands).kind;
-      if (voice === "space" || voice === "violin") this.playStaccato(ctx, master, when, freqFor(x, view), vel, voice);
-      else this.playSample(ctx, master, when, freqFor(x, view), vel, voice, beatSec);
+      const freq = freqFor(x, view);
+      if (voice === "space" || voice === "violin") this.playStaccato(ctx, master, when, freq, vel, voice);
+      else if (voice === "guitar") this.playSine(ctx, master, when, freq, vel, beatSec);
+      else this.playSample(ctx, master, when, freq, vel, voice, beatSec);
     }
     return ys;
   }
@@ -248,16 +249,29 @@ export class EdmEngine {
     src.buffer = buffer;
     src.playbackRate.setValueAtTime(rateFor(kind, freq), when);
     const gain = ctx.createGain();
-    const hold =
-      kind === "flute" || kind === "guitar"
-        ? Math.max(0.22, beatSec * 0.95)
-        : Math.max(0.05, Math.min(buffer.duration, beatSec * 0.9));
+    const hold = kind === "flute" ? Math.max(0.22, beatSec * 0.95) : Math.max(0.05, Math.min(buffer.duration, beatSec * 0.9));
     gain.gain.setValueAtTime(Math.max(0.0001, vel * (kind === "bass" ? 3.4 : 2.4)), when);
     gain.gain.exponentialRampToValueAtTime(0.0001, when + hold);
     src.connect(gain);
     gain.connect(master);
     src.start(when);
     src.stop(when + hold + 0.02);
+  }
+
+  private playSine(ctx: AudioContext, master: GainNode, when: number, freq: number, vel: number, beatSec: number): void {
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, when);
+    const gain = ctx.createGain();
+    const dur = Math.max(0.08, Math.min(0.22, beatSec * 0.9));
+    const level = Math.max(0.05, vel * 1.6);
+    gain.gain.setValueAtTime(0.0001, when);
+    gain.gain.exponentialRampToValueAtTime(level, when + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    osc.connect(gain);
+    gain.connect(master);
+    osc.start(when);
+    osc.stop(when + dur + 0.02);
   }
 
   private playStaccato(
@@ -338,12 +352,6 @@ export class EdmEngine {
       return noise / 2147483647;
     };
     return {
-      guitar: render(0.46, (t) => {
-        const env = Math.exp(-t * 5.5) * (1 - Math.exp(-t * 90));
-        let sum = 0;
-        for (let h = 1; h <= 7; h++) sum += Math.sin(2 * Math.PI * 220 * h * t) / h;
-        return Math.tanh(sum * 1.6) * env;
-      }),
       bass: render(0.55, (t) => {
         const env = Math.exp(-t * 2.4) * (1 - Math.exp(-t * 80));
         const body =
