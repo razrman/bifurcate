@@ -75,8 +75,9 @@ const SAMPLE_BASE: Record<SampleKind, number> = {
 };
 
 function rateFor(kind: SampleKind, freq: number): number {
-  const rate = freq / SAMPLE_BASE[kind];
-  return Math.min(4, Math.max(0.25, rate));
+  const played = kind === "bass" ? freq / 2 : freq;
+  const rate = played / SAMPLE_BASE[kind];
+  return Math.min(4, Math.max(0.2, rate));
 }
 
 export type VoiceBand = { kind: Kind; top: number; bottom: number };
@@ -251,7 +252,7 @@ export class EdmEngine {
       kind === "flute" || kind === "guitar"
         ? Math.max(0.22, beatSec * 0.95)
         : Math.max(0.05, Math.min(buffer.duration, beatSec * 0.9));
-    gain.gain.setValueAtTime(Math.max(0.0001, vel * 2.4), when);
+    gain.gain.setValueAtTime(Math.max(0.0001, vel * (kind === "bass" ? 3.4 : 2.4)), when);
     gain.gain.exponentialRampToValueAtTime(0.0001, when + hold);
     src.connect(gain);
     gain.connect(master);
@@ -334,12 +335,12 @@ export class EdmEngine {
         for (let h = 1; h <= 7; h++) sum += Math.sin(2 * Math.PI * 220 * h * t) / h;
         return Math.tanh(sum * 1.6) * env;
       }),
-      bass: render(0.42, (t) => {
-        const env = Math.exp(-t * 3.2) * (1 - Math.exp(-t * 120));
+      bass: render(0.55, (t) => {
+        const env = Math.exp(-t * 2.4) * (1 - Math.exp(-t * 80));
         const body =
+          0.55 * Math.sin(2 * Math.PI * 27.5 * t) +
           Math.sin(2 * Math.PI * 55 * t) +
-          0.28 * Math.sin(2 * Math.PI * 110 * t) +
-          0.06 * Math.sin(2 * Math.PI * 165 * t);
+          0.12 * Math.sin(2 * Math.PI * 110 * t);
         return body * env;
       }),
       slap: render(0.24, (t) => {
