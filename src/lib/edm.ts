@@ -142,10 +142,10 @@ export function freqFor(x: number, view: View, band?: { top: number; bottom: num
     const low = degreeToSemi(band.top * degrees);
     const high = degreeToSemi(Math.min(1, band.bottom) * degrees);
     const center = (low + high) / 2;
-    const half = Math.max(0, high - low) * 0.75;
+    const half = Math.max(0, high - low);
     let edgeLow = nearestScaleSemi(center - half);
     let edgeHigh = nearestScaleSemi(center + half);
-    const target = Math.max(0, high - low) * 1.5;
+    const target = Math.max(0, high - low) * 2;
     let guard = 0;
     while (edgeHigh - edgeLow + 0.25 < target && guard < 8) {
       if (center - edgeLow <= edgeHigh - center) edgeLow = stepScale(edgeLow, -1);
