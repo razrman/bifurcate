@@ -19,6 +19,8 @@ npm run dev
 
 Open `http://localhost:8080`.
 
+The design chat is in [GROK.md](GROK.md).
+
 ```bash
 npm run typecheck
 npm run build
